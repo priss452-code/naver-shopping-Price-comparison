@@ -8,7 +8,7 @@ import io
 
 # --- [UI 디자인] 와이드 레이아웃 설정 ---
 st.set_page_config(
-    page_title="시장 최저가 & 자사 비교 대시보드", 
+    page_title="시장 최저가 & 자사 비교 분석기", 
     layout="wide", 
     initial_sidebar_state="expanded"
 )
@@ -42,7 +42,7 @@ def get_naver_shopping(query):
         return []
 
 # --- 메인 헤더 ---
-st.title("🔍 가전 시장 최저가 & 자사 가격 비교 대시보드")
+st.title("🔍 가전 시장 최저가 & 자사 가격 비교 분석기")
 st.markdown("---")
 
 # [핵심] 두 가지 모드로 탭 분리
