@@ -19,7 +19,7 @@ CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET", "")
 
 # --- [UI] 사이드바: 공통 설정 (제외 키워드 커스텀) ---
 st.sidebar.header("⚙️ 검색 공통 설정")
-default_excludes = "렌탈, 대여, 부속, 부품, 소모품, 필터, 거치대, 액세서리, 악세사리, 케이스, 칼날, 탬퍼, 세척액, 용기, 보상판매"
+default_excludes = "렌탈, 대여, 부속, 부품, 소모품, 필터, 거치대, 액세서리, 악세사리, 케이스, 칼날, 탬퍼, 세척액, 용기, 보상판매, 약정기간, 호환, 개월"
 exclude_input = st.sidebar.text_area(
     "🚫 검색 제외 키워드 (쉼표로 구분)", 
     value=default_excludes, 
