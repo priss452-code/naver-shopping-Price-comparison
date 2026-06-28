@@ -45,8 +45,12 @@ def get_naver_shopping(query):
 st.title("🔍 가전 시장 최저가 & 자사 가격 비교 분석기")
 st.markdown("---")
 
-# [핵심] 두 가지 모드로 탭 분리
-tab_single, tab_batch = st.tabs(["🔎 단일 모델 상세 분석", "📊 엑셀 일괄 가격 비교 (Comparison)"])
+# [핵심] 세 가지 모드로 탭 분리 (쿠팡 탭 추가)
+tab_single, tab_batch, tab_coupang = st.tabs([
+    "🔎 단일 모델 상세 분석", 
+    "📊 엑셀 일괄 비교 (전체 온라인)", 
+    "🚀 엑셀 일괄 비교 (쿠팡 전용)"
+])
 
 # ==========================================
 # 탭 1: 단일 모델 상세 분석
@@ -122,47 +126,34 @@ with tab_single:
                         st.warning("⚠️ 조건에 부합하는 데이터가 없습니다.")
 
 # ==========================================
-# 탭 2: 엑셀 파일 일괄 비교 모드
+# 탭 2: 엑셀 파일 일괄 비교 모드 (전체 쇼핑몰)
 # ==========================================
 with tab_batch:
-    st.subheader("📁 자사 판매가 vs 온라인 최저가 일괄 비교")
+    st.subheader("📁 자사 판매가 vs 온라인 전체 최저가 일괄 비교")
     st.markdown("`모델명`, `자사판매가` 컬럼이 포함된 엑셀(.xlsx) 파일을 업로드하세요.")
     
     with st.expander("💡 엑셀 업로드 양식 예시 보기 및 템플릿 다운로드"):
-        st.markdown("업로드할 엑셀 파일의 첫 번째 줄(헤더)은 반드시 아래 표와 동일하게 **'모델명'**, **'자사판매가'**, **'비고'**로 작성되어야 합니다.")
-        
         template_df = pd.DataFrame({
             "모델명": ["드롱기 아이코나 빈티지", "네스프레소 버츄오 팝", "닌자 포터블믹서기"],
             "자사판매가": [150000, 120000, 85000],
             "비고": ["에스프레소 머신", "홈카페 기획전", "파워모터 적용"]
         })
-        
         st.dataframe(template_df, use_container_width=True, hide_index=True)
         
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             template_df.to_excel(writer, index=False, sheet_name='Sheet1')
-        
-        st.download_button(
-            label="📥 엑셀 양식 템플릿 다운로드 (.xlsx)",
-            data=buffer.getvalue(),
-            file_name="price_comparison_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button(label="📥 엑셀 양식 템플릿 다운로드 (.xlsx)", data=buffer.getvalue(), file_name="price_comparison_template.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     
     st.markdown("---")
-    
-    uploaded_file = st.file_uploader("위 양식에 맞춘 엑셀 파일을 업로드해 주세요", type=["xlsx", "xls"])
+    uploaded_file = st.file_uploader("전체 쇼핑몰 비교용 엑셀 파일을 업로드해 주세요", type=["xlsx", "xls"], key="upload_all")
     
     if uploaded_file is not None:
         try:
             input_df = pd.read_excel(uploaded_file)
-            
             if "모델명" not in input_df.columns or "자사판매가" not in input_df.columns:
-                st.error("⚠️ 엑셀 파일 첫 번째 줄에 '모델명'과 '자사판매가' 컬럼이 반드시 있어야 합니다. 템플릿을 확인해 주세요.")
+                st.error("⚠️ 엑셀 파일 첫 번째 줄에 '모델명'과 '자사판매가' 컬럼이 반드시 있어야 합니다.")
             else:
-                st.info(f"총 {len(input_df)}개의 모델 데이터를 확인했습니다. 실시간 최저가 조회를 시작합니다.")
-                
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 results = []
@@ -172,75 +163,132 @@ with tab_batch:
                     my_price = int(row['자사판매가']) if pd.notnull(row['자사판매가']) else 0
                     note = str(row['비고']) if '비고' in row and pd.notnull(row['비고']) else ''
                     
-                    status_text.text(f"🔍 '{model_name}' 실시간 가격 조회 중... ({index + 1}/{len(input_df)})")
-                    
+                    status_text.text(f"🔍 '{model_name}' 전체 쇼핑몰 최저가 조회 중... ({index + 1}/{len(input_df)})")
                     items = get_naver_shopping(model_name)
-                    online_lowest = None
-                    lowest_mall = "" # 쇼핑몰 이름을 저장할 변수 추가
+                    
+                    online_lowest = 0
+                    lowest_mall = "-"
+                    status = "조회 불가"
+                    diff = 0
                     
                     if items:
-                        # 정상적인 가격 데이터만 필터링
                         valid_items = [item for item in items if item['lprice'].isdigit() and int(item['lprice']) > 0]
                         if valid_items:
-                            # 가격 기준으로 가장 저렴한 상품 객체 추출
                             lowest_item = min(valid_items, key=lambda x: int(x['lprice']))
                             online_lowest = int(lowest_item['lprice'])
-                            # 해당 상품의 쇼핑몰 이름 저장
                             lowest_mall = lowest_item['mallName'] if lowest_item['mallName'] else "오픈마켓"
-                    
-                    if online_lowest:
-                        diff = my_price - online_lowest
-                        status = "✅ 우위" if diff <= 0 else "경고"
-                    else:
-                        diff = 0
-                        status = "조회 불가"
-                        online_lowest = 0
-                        lowest_mall = "-"
+                            diff = my_price - online_lowest
+                            status = "✅ 우위" if diff <= 0 else "경고"
                     
                     results.append({
-                        "모델명": model_name,
-                        "비고": note,
-                        "자사판매가(원)": my_price,
-                        "온라인최저가(원)": online_lowest,
-                        "최저가쇼핑몰": lowest_mall, # 결과 데이터에 최저가 쇼핑몰 열 추가
-                        "가격차이(원)": diff,
-                        "경쟁력": status
+                        "모델명": model_name, "비고": note, "자사판매가(원)": my_price,
+                        "온라인최저가(원)": online_lowest, "최저가쇼핑몰": lowest_mall,
+                        "가격차이(원)": diff, "경쟁력": status
                     })
                     
                     progress_bar.progress((index + 1) / len(input_df))
                     time.sleep(0.1) 
                 
                 status_text.text("✨ 데이터 분석이 완료되었습니다!")
-                
                 result_df = pd.DataFrame(results)
                 
-                st.markdown("### 📊 가격 경쟁력 시각화")
-                chart_df = result_df.melt(id_vars=['모델명'], value_vars=['자사판매가(원)', '온라인최저가(원)'], 
-                                          var_name='분류', value_name='가격')
+                st.markdown("### 📊 가격 경쟁력 시각화 (전체)")
+                chart_df = result_df.melt(id_vars=['모델명'], value_vars=['자사판매가(원)', '온라인최저가(원)'], var_name='분류', value_name='가격')
                 chart_df = chart_df[chart_df['가격'] > 0]
-                
-                fig = px.bar(chart_df, x='모델명', y='가격', color='분류', barmode='group',
-                             title="모델별 자사 판매가 vs 온라인 최저가 비교",
-                             template="plotly_white",
-                             color_discrete_map={"자사판매가(원)": "#3A6073", "온라인최저가(원)": "#E67E22"})
+                fig = px.bar(chart_df, x='모델명', y='가격', color='분류', barmode='group', template="plotly_white", color_discrete_map={"자사판매가(원)": "#3A6073", "온라인최저가(원)": "#E67E22"})
                 st.plotly_chart(fig, use_container_width=True)
                 
                 st.markdown("### 📋 상세 비교 리스트")
-                
                 csv_data = result_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 비교 결과 엑셀(CSV) 다운로드", data=csv_data, file_name="price_comparison_result.csv", mime="text/csv")
+                st.download_button("📥 전체 비교 결과 엑셀(CSV) 다운로드", data=csv_data, file_name="all_price_comparison.csv", mime="text/csv", key="down_all")
                 
                 def color_competitiveness(val):
                     color = 'green' if val == '✅ 우위' else 'red' if val == '경고' else 'grey'
                     return f'color: {color}; font-weight: bold'
                 
-                styled_df = result_df.style.map(color_competitiveness, subset=['경쟁력']).format({
-                    "자사판매가(원)": "{:,}",
-                    "온라인최저가(원)": "{:,}",
-                    "가격차이(원)": "{:,}"
-                })
-                
+                styled_df = result_df.style.map(color_competitiveness, subset=['경쟁력']).format({"자사판매가(원)": "{:,}", "온라인최저가(원)": "{:,}", "가격차이(원)": "{:,}"})
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
         except Exception as e:
-            st.error(f"⚠️ 엑셀 파일을 읽는 중 오류가 발생했습니다. 양식을 다시 확인해 주세요. (에러: {e})")
+            st.error(f"⚠️ 오류가 발생했습니다: {e}")
+
+# ==========================================
+# 탭 3: 엑셀 파일 일괄 비교 모드 (쿠팡 전용)
+# ==========================================
+with tab_coupang:
+    st.subheader("🚀 자사 판매가 vs 쿠팡 최저가 일괄 비교")
+    st.markdown("네이버 쇼핑 데이터 중 **'쿠팡'** 채널에서 판매되는 최저가만 필터링하여 비교합니다. 양식은 이전 탭과 동일합니다.")
+    
+    # 양식은 탭 2와 동일하므로 별도 다운로드 버튼 없이 파일 업로더 바로 노출
+    uploaded_file_cp = st.file_uploader("쿠팡 비교용 엑셀 파일을 업로드해 주세요", type=["xlsx", "xls"], key="upload_cp")
+    
+    if uploaded_file_cp is not None:
+        try:
+            input_df_cp = pd.read_excel(uploaded_file_cp)
+            if "모델명" not in input_df_cp.columns or "자사판매가" not in input_df_cp.columns:
+                st.error("⚠️ 엑셀 파일 첫 번째 줄에 '모델명'과 '자사판매가' 컬럼이 반드시 있어야 합니다.")
+            else:
+                progress_bar_cp = st.progress(0)
+                status_text_cp = st.empty()
+                results_cp = []
+                
+                for index, row in input_df_cp.iterrows():
+                    model_name = str(row['모델명'])
+                    my_price = int(row['자사판매가']) if pd.notnull(row['자사판매가']) else 0
+                    note = str(row['비고']) if '비고' in row and pd.notnull(row['비고']) else ''
+                    
+                    status_text_cp.text(f"🔍 '{model_name}' 쿠팡 최저가 필터링 중... ({index + 1}/{len(input_df_cp)})")
+                    items = get_naver_shopping(model_name)
+                    
+                    coupang_lowest = 0
+                    status = "쿠팡 판매 안함"
+                    diff = 0
+                    
+                    if items:
+                        # [핵심] 쿠팡에서 판매하는 상품만 1차 필터링
+                        valid_items = [item for item in items if item['lprice'].isdigit() and int(item['lprice']) > 0]
+                        coupang_items = [item for item in valid_items if "쿠팡" in item['mallName']]
+                        
+                        if coupang_items:
+                            # 쿠팡 상품 중 최저가 추출
+                            lowest_item = min(coupang_items, key=lambda x: int(x['lprice']))
+                            coupang_lowest = int(lowest_item['lprice'])
+                            diff = my_price - coupang_lowest
+                            status = "✅ 우위" if diff <= 0 else "경고"
+                    
+                    results_cp.append({
+                        "모델명": model_name, 
+                        "비고": note, 
+                        "자사판매가(원)": my_price,
+                        "쿠팡최저가(원)": coupang_lowest, 
+                        "가격차이(원)": diff, 
+                        "경쟁력": status
+                    })
+                    
+                    progress_bar_cp.progress((index + 1) / len(input_df_cp))
+                    time.sleep(0.1) 
+                
+                status_text_cp.text("✨ 쿠팡 전용 데이터 분석이 완료되었습니다!")
+                result_df_cp = pd.DataFrame(results_cp)
+                
+                st.markdown("### 📊 쿠팡 가격 경쟁력 시각화")
+                chart_df_cp = result_df_cp.melt(id_vars=['모델명'], value_vars=['자사판매가(원)', '쿠팡최저가(원)'], var_name='분류', value_name='가격')
+                chart_df_cp = chart_df_cp[chart_df_cp['가격'] > 0] # 0원 데이터 제외
+                
+                # 쿠팡의 상징색인 붉은 계열로 차트 컬러 변경
+                fig_cp = px.bar(chart_df_cp, x='모델명', y='가격', color='분류', barmode='group', template="plotly_white", color_discrete_map={"자사판매가(원)": "#3A6073", "쿠팡최저가(원)": "#E74C3C"})
+                st.plotly_chart(fig_cp, use_container_width=True)
+                
+                st.markdown("### 📋 쿠팡 상세 비교 리스트")
+                csv_data_cp = result_df_cp.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("📥 쿠팡 비교 결과 엑셀(CSV) 다운로드", data=csv_data_cp, file_name="coupang_price_comparison.csv", mime="text/csv", key="down_cp")
+                
+                def color_competitiveness_cp(val):
+                    color = 'green' if val == '✅ 우위' else 'red' if val == '경고' else 'grey'
+                    return f'color: {color}; font-weight: bold'
+                
+                styled_df_cp = result_df_cp.style.map(color_competitiveness_cp, subset=['경쟁력']).format({"자사판매가(원)": "{:,}", "쿠팡최저가(원)": "{:,}", "가격차이(원)": "{:,}"})
+                st.dataframe(styled_df_cp, use_container_width=True, hide_index=True)
+
+        except Exception as e:
+            st.error(f"⚠️ 오류가 발생했습니다: {e}")
