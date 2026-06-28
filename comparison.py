@@ -4,10 +4,11 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timezone, timedelta
 import time
+import io
 
 # --- [UI 디자인] 와이드 레이아웃 설정 ---
 st.set_page_config(
-    page_title="시장 최저가 & 자사 비교 분석", 
+    page_title="시장 최저가 & 자사 비교 분석기", 
     layout="wide", 
     initial_sidebar_state="expanded"
 )
@@ -41,14 +42,14 @@ def get_naver_shopping(query):
         return []
 
 # --- 메인 헤더 ---
-st.title("🔍 가전 시장 최저가 & 자사 가격 비교 분석")
+st.title("🔍 가전 시장 최저가 & 자사 가격 비교 분석기")
 st.markdown("---")
 
 # [핵심] 두 가지 모드로 탭 분리
 tab_single, tab_batch = st.tabs(["🔎 단일 모델 상세 분석", "📊 엑셀 일괄 가격 비교 (Comparison)"])
 
 # ==========================================
-# 탭 1: 기존 단일 모델 상세 분석
+# 탭 1: 단일 모델 상세 분석
 # ==========================================
 with tab_single:
     search_query = st.text_input("분석할 가전 모델명 또는 키워드를 입력하세요", placeholder="예: 에스프레소 머신")
@@ -121,36 +122,59 @@ with tab_single:
                         st.warning("⚠️ 조건에 부합하는 데이터가 없습니다.")
 
 # ==========================================
-# 탭 2: 엑셀 파일 일괄 비교 모드 (신규 기능)
+# 탭 2: 엑셀 파일 일괄 비교 모드
 # ==========================================
 with tab_batch:
     st.subheader("📁 자사 판매가 vs 온라인 최저가 일괄 비교")
     st.markdown("`모델명`, `자사판매가` 컬럼이 포함된 엑셀(.xlsx) 파일을 업로드하세요.")
     
-    uploaded_file = st.file_uploader("엑셀 파일 업로드", type=["xlsx", "xls"])
+    # [기능 추가] 엑셀 양식 예시 및 다운로드 제공
+    with st.expander("💡 엑셀 업로드 양식 예시 보기 및 템플릿 다운로드"):
+        st.markdown("업로드할 엑셀 파일의 첫 번째 줄(헤더)은 반드시 아래 표와 동일하게 **'모델명'**, **'자사판매가'**, **'비고'**로 작성되어야 합니다.")
+        
+        template_df = pd.DataFrame({
+            "모델명": ["드롱기 아이코나 빈티지", "네스프레소 버츄오 팝", "닌자 포터블믹서기"],
+            "자사판매가": [150000, 120000, 85000],
+            "비고": ["에스프레소 머신", "홈카페 기획전", "파워모터 적용"]
+        })
+        
+        st.dataframe(template_df, use_container_width=True, hide_index=True)
+        
+        # 엑셀 파일 생성용 버퍼
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            template_df.to_excel(writer, index=False, sheet_name='Sheet1')
+        
+        st.download_button(
+            label="📥 엑셀 양식 템플릿 다운로드 (.xlsx)",
+            data=buffer.getvalue(),
+            file_name="price_comparison_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    st.markdown("---")
+    
+    # 파일 업로더
+    uploaded_file = st.file_uploader("위 양식에 맞춘 엑셀 파일을 업로드해 주세요", type=["xlsx", "xls"])
     
     if uploaded_file is not None:
         try:
-            # 엑셀 파일 읽기
             input_df = pd.read_excel(uploaded_file)
             
-            # 필수 컬럼 확인
             if "모델명" not in input_df.columns or "자사판매가" not in input_df.columns:
-                st.error("⚠️ 엑셀 파일 첫 번째 줄에 '모델명'과 '자사판매가' 컬럼이 반드시 있어야 합니다.")
+                st.error("⚠️ 엑셀 파일 첫 번째 줄에 '모델명'과 '자사판매가' 컬럼이 반드시 있어야 합니다. 템플릿을 확인해 주세요.")
             else:
                 st.info(f"총 {len(input_df)}개의 모델 데이터를 확인했습니다. 실시간 최저가 조회를 시작합니다.")
                 
-                # 진행 상태 표시 바
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                
                 results = []
                 
-                # 각 모델별로 API 호출하여 최저가 찾기
                 for index, row in input_df.iterrows():
                     model_name = str(row['모델명'])
-                    my_price = int(row['자사판매가'])
-                    note = row.get('비고', '')
+                    # 빈 값(NaN) 처리
+                    my_price = int(row['자사판매가']) if pd.notnull(row['자사판매가']) else 0
+                    note = str(row['비고']) if '비고' in row and pd.notnull(row['비고']) else ''
                     
                     status_text.text(f"🔍 '{model_name}' 실시간 가격 조회 중... ({index + 1}/{len(input_df)})")
                     
@@ -162,7 +186,6 @@ with tab_batch:
                         if prices:
                             online_lowest = min(prices)
                     
-                    # 가격 차이 및 경쟁력 계산
                     if online_lowest:
                         diff = my_price - online_lowest
                         status = "✅ 우위" if diff <= 0 else "경고"
@@ -180,23 +203,16 @@ with tab_batch:
                         "경쟁력": status
                     })
                     
-                    # 진행률 업데이트 및 네이버 API 제한 방지용 짧은 대기
                     progress_bar.progress((index + 1) / len(input_df))
                     time.sleep(0.1) 
                 
                 status_text.text("✨ 데이터 분석이 완료되었습니다!")
                 
-                # 결과 데이터프레임 생성
                 result_df = pd.DataFrame(results)
                 
-                # 가격 비교 시각화 (막대 그래프)
                 st.markdown("### 📊 가격 경쟁력 시각화")
-                
-                # 그래프를 그리기 위해 데이터를 긴 형태(Melt)로 변환
                 chart_df = result_df.melt(id_vars=['모델명'], value_vars=['자사판매가(원)', '온라인최저가(원)'], 
                                           var_name='분류', value_name='가격')
-                
-                # 0원(조회 불가)인 데이터는 그래프에서 제외
                 chart_df = chart_df[chart_df['가격'] > 0]
                 
                 fig = px.bar(chart_df, x='모델명', y='가격', color='분류', barmode='group',
@@ -205,13 +221,11 @@ with tab_batch:
                              color_discrete_map={"자사판매가(원)": "#3A6073", "온라인최저가(원)": "#E67E22"})
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # 최종 데이터 표 출력
                 st.markdown("### 📋 상세 비교 리스트")
                 
                 csv_data = result_df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button("📥 비교 결과 엑셀(CSV) 다운로드", data=csv_data, file_name="price_comparison_result.csv", mime="text/csv")
                 
-                # 표 서식 지정 (가격차이가 음수면 우위, 양수면 열위)
                 def color_competitiveness(val):
                     color = 'green' if val == '✅ 우위' else 'red' if val == '경고' else 'grey'
                     return f'color: {color}; font-weight: bold'
