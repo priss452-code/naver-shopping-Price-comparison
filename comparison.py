@@ -8,7 +8,7 @@ import io
 
 # --- [UI 디자인] 와이드 레이아웃 설정 ---
 st.set_page_config(
-    page_title="시장 최저가 & 자사 비교 분석기", 
+    page_title="시장 최저가 & 자사 비교 대시보드", 
     layout="wide", 
     initial_sidebar_state="expanded"
 )
@@ -16,6 +16,14 @@ st.set_page_config(
 # --- [보안] API 인증 정보 가져오기 ---
 CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID", "")
 CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET", "")
+
+# --- [설정] 검색 제외 키워드 ---
+# 이 리스트에 포함된 단어가 상품명에 들어가 있으면 결과에서 완전히 제외합니다.
+EXCLUDE_KEYWORDS = [
+    "렌탈", "대여", "부속", "부품", "소모품", "필터", 
+    "거치대", "액세서리", "악세사리", "케이스", "칼날", 
+    "탬퍼", "세척액", "용기", "보상판매"
+]
 
 def get_naver_shopping(query):
     if not CLIENT_ID or not CLIENT_SECRET:
@@ -35,17 +43,29 @@ def get_naver_shopping(query):
     try:
         response = requests.get(url, headers=headers, params=params)
         if response.status_code == 200:
-            return response.json().get('items', [])
+            raw_items = response.json().get('items', [])
+            filtered_items = []
+            
+            for item in raw_items:
+                # 네이버 API가 보내주는 <b> 태그 사전 제거
+                clean_title = item['title'].replace('<b>', '').replace('</b>', '')
+                
+                # 제외 키워드가 하나라도 상품명에 포함되어 있는지 검사
+                if not any(keyword in clean_title for keyword in EXCLUDE_KEYWORDS):
+                    item['title'] = clean_title # 깔끔해진 제목으로 교체
+                    filtered_items.append(item)
+                    
+            return filtered_items
         else:
             return []
     except Exception as e:
         return []
 
 # --- 메인 헤더 ---
-st.title("🔍 가전 시장 최저가 & 자사 가격 비교 분석기")
+st.title("🔍 가전 시장 최저가 & 자사 가격 비교 대시보드")
 st.markdown("---")
 
-# [핵심] 세 가지 모드로 탭 분리 (쿠팡 탭 추가)
+# [핵심] 세 가지 모드로 탭 분리
 tab_single, tab_batch, tab_coupang = st.tabs([
     "🔎 단일 모델 상세 분석", 
     "📊 엑셀 일괄 비교 (전체 온라인)", 
@@ -56,16 +76,15 @@ tab_single, tab_batch, tab_coupang = st.tabs([
 # 탭 1: 단일 모델 상세 분석
 # ==========================================
 with tab_single:
-    search_query = st.text_input("분석할 가전 모델명 또는 키워드를 입력하세요", placeholder="예: 에스프레소 머신")
+    search_query = st.text_input("분석할 가전 모델명 또는 키워드를 입력하세요", placeholder="예: 에스프레소 머신, 포터블믹서기")
 
     if search_query:
-        with st.spinner("데이터를 분석 중입니다..."):
+        with st.spinner("데이터를 분석 중입니다... (렌탈/부속품 제외 중)"):
             items = get_naver_shopping(search_query)
             
             if items:
                 parsed_data = []
                 for item in items:
-                    clean_title = item['title'].replace('<b>', '').replace('</b>', '')
                     try:
                         price = int(item['lprice'])
                     except:
@@ -73,7 +92,7 @@ with tab_single:
                         
                     parsed_data.append({
                         "이미지": item['image'],
-                        "상품명": clean_title,
+                        "상품명": item['title'],
                         "최저가(원)": price,
                         "브랜드": item.get('brand', '기타') if item.get('brand') else '기타',
                         "쇼핑몰": item['mallName'] if item['mallName'] else '오픈마켓',
@@ -219,7 +238,6 @@ with tab_coupang:
     st.subheader("🚀 자사 판매가 vs 쿠팡 최저가 일괄 비교")
     st.markdown("네이버 쇼핑 데이터 중 **'쿠팡'** 채널에서 판매되는 최저가만 필터링하여 비교합니다. 양식은 이전 탭과 동일합니다.")
     
-    # 양식은 탭 2와 동일하므로 별도 다운로드 버튼 없이 파일 업로더 바로 노출
     uploaded_file_cp = st.file_uploader("쿠팡 비교용 엑셀 파일을 업로드해 주세요", type=["xlsx", "xls"], key="upload_cp")
     
     if uploaded_file_cp is not None:
@@ -245,12 +263,10 @@ with tab_coupang:
                     diff = 0
                     
                     if items:
-                        # [핵심] 쿠팡에서 판매하는 상품만 1차 필터링
                         valid_items = [item for item in items if item['lprice'].isdigit() and int(item['lprice']) > 0]
                         coupang_items = [item for item in valid_items if "쿠팡" in item['mallName']]
                         
                         if coupang_items:
-                            # 쿠팡 상품 중 최저가 추출
                             lowest_item = min(coupang_items, key=lambda x: int(x['lprice']))
                             coupang_lowest = int(lowest_item['lprice'])
                             diff = my_price - coupang_lowest
@@ -273,9 +289,8 @@ with tab_coupang:
                 
                 st.markdown("### 📊 쿠팡 가격 경쟁력 시각화")
                 chart_df_cp = result_df_cp.melt(id_vars=['모델명'], value_vars=['자사판매가(원)', '쿠팡최저가(원)'], var_name='분류', value_name='가격')
-                chart_df_cp = chart_df_cp[chart_df_cp['가격'] > 0] # 0원 데이터 제외
+                chart_df_cp = chart_df_cp[chart_df_cp['가격'] > 0] 
                 
-                # 쿠팡의 상징색인 붉은 계열로 차트 컬러 변경
                 fig_cp = px.bar(chart_df_cp, x='모델명', y='가격', color='분류', barmode='group', template="plotly_white", color_discrete_map={"자사판매가(원)": "#3A6073", "쿠팡최저가(원)": "#E74C3C"})
                 st.plotly_chart(fig_cp, use_container_width=True)
                 
