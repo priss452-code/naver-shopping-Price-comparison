@@ -17,15 +17,19 @@ st.set_page_config(
 CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID", "")
 CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET", "")
 
-# --- [설정] 검색 제외 키워드 ---
-# 이 리스트에 포함된 단어가 상품명에 들어가 있으면 결과에서 완전히 제외합니다.
-EXCLUDE_KEYWORDS = [
-    "렌탈", "대여", "부속", "부품", "소모품", "필터", 
-    "거치대", "액세서리", "악세사리", "케이스", "칼날", 
-    "탬퍼", "세척액", "용기", "보상판매"
-]
+# --- [UI] 사이드바: 공통 설정 (제외 키워드 커스텀) ---
+st.sidebar.header("⚙️ 검색 공통 설정")
+default_excludes = "렌탈, 대여, 부속, 부품, 소모품, 필터, 거치대, 액세서리, 악세사리, 케이스, 칼날, 탬퍼, 세척액, 용기, 보상판매"
+exclude_input = st.sidebar.text_area(
+    "🚫 검색 제외 키워드 (쉼표로 구분)", 
+    value=default_excludes, 
+    help="여기에 입력된 단어가 상품명에 포함되어 있으면 분석 결과에서 완전히 제외됩니다. 취급하는 카테고리에 맞춰 자유롭게 수정하세요."
+)
+# 사용자가 입력한 문자열을 쉼표 기준으로 나누고 공백을 제거하여 리스트로 변환
+exclude_keywords_list = [k.strip() for k in exclude_input.split(",") if k.strip()]
 
-def get_naver_shopping(query):
+
+def get_naver_shopping(query, excludes):
     if not CLIENT_ID or not CLIENT_SECRET:
         return []
     
@@ -47,12 +51,11 @@ def get_naver_shopping(query):
             filtered_items = []
             
             for item in raw_items:
-                # 네이버 API가 보내주는 <b> 태그 사전 제거
                 clean_title = item['title'].replace('<b>', '').replace('</b>', '')
                 
-                # 제외 키워드가 하나라도 상품명에 포함되어 있는지 검사
-                if not any(keyword in clean_title for keyword in EXCLUDE_KEYWORDS):
-                    item['title'] = clean_title # 깔끔해진 제목으로 교체
+                # 사용자가 설정한 제외 키워드 필터링 적용
+                if not any(keyword in clean_title for keyword in excludes):
+                    item['title'] = clean_title 
                     filtered_items.append(item)
                     
             return filtered_items
@@ -60,6 +63,7 @@ def get_naver_shopping(query):
             return []
     except Exception as e:
         return []
+
 
 # --- 메인 헤더 ---
 st.title("🔍 가전 시장 최저가 & 자사 가격 비교 대시보드")
@@ -79,8 +83,9 @@ with tab_single:
     search_query = st.text_input("분석할 가전 모델명 또는 키워드를 입력하세요", placeholder="예: 에스프레소 머신, 포터블믹서기")
 
     if search_query:
-        with st.spinner("데이터를 분석 중입니다... (렌탈/부속품 제외 중)"):
-            items = get_naver_shopping(search_query)
+        with st.spinner("데이터를 분석 중입니다... (제외 키워드 필터링 중)"):
+            # 함수 호출 시 사용자가 설정한 제외 키워드 리스트를 전달
+            items = get_naver_shopping(search_query, exclude_keywords_list)
             
             if items:
                 parsed_data = []
@@ -104,7 +109,8 @@ with tab_single:
                 df = df.sort_values(by="최저가(원)", ascending=True).reset_index(drop=True)
                 
                 if not df.empty:
-                    st.sidebar.header("🎯 시장 데이터 필터링")
+                    st.sidebar.markdown("---")
+                    st.sidebar.header("🎯 결과 데이터 필터링 (단일 분석용)")
                     
                     min_p = int(df["최저가(원)"].min())
                     max_p = int(df["최저가(원)"].max())
@@ -183,7 +189,7 @@ with tab_batch:
                     note = str(row['비고']) if '비고' in row and pd.notnull(row['비고']) else ''
                     
                     status_text.text(f"🔍 '{model_name}' 전체 쇼핑몰 최저가 조회 중... ({index + 1}/{len(input_df)})")
-                    items = get_naver_shopping(model_name)
+                    items = get_naver_shopping(model_name, exclude_keywords_list)
                     
                     online_lowest = 0
                     lowest_mall = "-"
@@ -256,7 +262,7 @@ with tab_coupang:
                     note = str(row['비고']) if '비고' in row and pd.notnull(row['비고']) else ''
                     
                     status_text_cp.text(f"🔍 '{model_name}' 쿠팡 최저가 필터링 중... ({index + 1}/{len(input_df_cp)})")
-                    items = get_naver_shopping(model_name)
+                    items = get_naver_shopping(model_name, exclude_keywords_list)
                     
                     coupang_lowest = 0
                     status = "쿠팡 판매 안함"
