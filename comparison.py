@@ -8,7 +8,7 @@ import io
 
 # --- [UI 디자인] 와이드 레이아웃 설정 ---
 st.set_page_config(
-    page_title="시장 최저가 & 자사 비교 분석기", 
+    page_title="시장 최저가 & 자사 비교 대시보드", 
     layout="wide", 
     initial_sidebar_state="expanded"
 )
@@ -42,7 +42,7 @@ def get_naver_shopping(query):
         return []
 
 # --- 메인 헤더 ---
-st.title("🔍 가전 시장 최저가 & 자사 가격 비교 분석기")
+st.title("🔍 가전 시장 최저가 & 자사 가격 비교 대시보드")
 st.markdown("---")
 
 # [핵심] 두 가지 모드로 탭 분리
@@ -128,7 +128,6 @@ with tab_batch:
     st.subheader("📁 자사 판매가 vs 온라인 최저가 일괄 비교")
     st.markdown("`모델명`, `자사판매가` 컬럼이 포함된 엑셀(.xlsx) 파일을 업로드하세요.")
     
-    # [기능 추가] 엑셀 양식 예시 및 다운로드 제공
     with st.expander("💡 엑셀 업로드 양식 예시 보기 및 템플릿 다운로드"):
         st.markdown("업로드할 엑셀 파일의 첫 번째 줄(헤더)은 반드시 아래 표와 동일하게 **'모델명'**, **'자사판매가'**, **'비고'**로 작성되어야 합니다.")
         
@@ -140,7 +139,6 @@ with tab_batch:
         
         st.dataframe(template_df, use_container_width=True, hide_index=True)
         
-        # 엑셀 파일 생성용 버퍼
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             template_df.to_excel(writer, index=False, sheet_name='Sheet1')
@@ -154,7 +152,6 @@ with tab_batch:
     
     st.markdown("---")
     
-    # 파일 업로더
     uploaded_file = st.file_uploader("위 양식에 맞춘 엑셀 파일을 업로드해 주세요", type=["xlsx", "xls"])
     
     if uploaded_file is not None:
@@ -172,7 +169,6 @@ with tab_batch:
                 
                 for index, row in input_df.iterrows():
                     model_name = str(row['모델명'])
-                    # 빈 값(NaN) 처리
                     my_price = int(row['자사판매가']) if pd.notnull(row['자사판매가']) else 0
                     note = str(row['비고']) if '비고' in row and pd.notnull(row['비고']) else ''
                     
@@ -180,11 +176,17 @@ with tab_batch:
                     
                     items = get_naver_shopping(model_name)
                     online_lowest = None
+                    lowest_mall = "" # 쇼핑몰 이름을 저장할 변수 추가
                     
                     if items:
-                        prices = [int(item['lprice']) for item in items if item['lprice'].isdigit() and int(item['lprice']) > 0]
-                        if prices:
-                            online_lowest = min(prices)
+                        # 정상적인 가격 데이터만 필터링
+                        valid_items = [item for item in items if item['lprice'].isdigit() and int(item['lprice']) > 0]
+                        if valid_items:
+                            # 가격 기준으로 가장 저렴한 상품 객체 추출
+                            lowest_item = min(valid_items, key=lambda x: int(x['lprice']))
+                            online_lowest = int(lowest_item['lprice'])
+                            # 해당 상품의 쇼핑몰 이름 저장
+                            lowest_mall = lowest_item['mallName'] if lowest_item['mallName'] else "오픈마켓"
                     
                     if online_lowest:
                         diff = my_price - online_lowest
@@ -193,12 +195,14 @@ with tab_batch:
                         diff = 0
                         status = "조회 불가"
                         online_lowest = 0
+                        lowest_mall = "-"
                     
                     results.append({
                         "모델명": model_name,
                         "비고": note,
                         "자사판매가(원)": my_price,
                         "온라인최저가(원)": online_lowest,
+                        "최저가쇼핑몰": lowest_mall, # 결과 데이터에 최저가 쇼핑몰 열 추가
                         "가격차이(원)": diff,
                         "경쟁력": status
                     })
